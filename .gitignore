@@ -1,0 +1,36 @@
+# Environment & secrets
+.env
+*.json.key
+service-account*.json
+
+# Recommendation caches (local state, not source)
+recommendations_cache.json
+smart_recommendations_cache.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
