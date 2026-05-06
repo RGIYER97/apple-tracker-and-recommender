@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import datetime
 from pathlib import Path
 from collections import Counter
 
@@ -16,34 +17,50 @@ CACHE_FILE       = Path(__file__).parent / "recommendations_cache.json"
 SMART_CACHE_FILE = Path(__file__).parent / "smart_recommendations_cache.json"
 
 
-def _load_rec_cache() -> list[dict]:
+def _load_rec_cache() -> tuple[list[dict], str | None, int | None]:
     try:
         if CACHE_FILE.exists():
-            return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+            data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data, None, None
+            return data.get("recs", []), data.get("generated_at"), data.get("entry_count")
     except Exception:
         pass
-    return []
+    return [], None, None
 
 
-def _save_rec_cache(recs: list[dict]) -> None:
+def _save_rec_cache(recs: list[dict], entry_count: int = 0) -> None:
     try:
-        CACHE_FILE.write_text(json.dumps(recs, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = {
+            "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "entry_count": entry_count,
+            "recs": recs,
+        }
+        CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
 
 
-def _load_smart_cache() -> list[dict]:
+def _load_smart_cache() -> tuple[list[dict], str | None, int | None]:
     try:
         if SMART_CACHE_FILE.exists():
-            return json.loads(SMART_CACHE_FILE.read_text(encoding="utf-8"))
+            data = json.loads(SMART_CACHE_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data, None, None
+            return data.get("recs", []), data.get("generated_at"), data.get("entry_count")
     except Exception:
         pass
-    return []
+    return [], None, None
 
 
-def _save_smart_cache(recs: list[dict]) -> None:
+def _save_smart_cache(recs: list[dict], entry_count: int = 0) -> None:
     try:
-        SMART_CACHE_FILE.write_text(json.dumps(recs, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = {
+            "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "entry_count": entry_count,
+            "recs": recs,
+        }
+        SMART_CACHE_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
 
@@ -66,8 +83,8 @@ BG_SIDEBAR  = "#1A3B2A"   # deep forest green
 ACCENT      = "#C0392B"   # red apple
 ACCENT_DARK = "#922B21"   # darker red for hover/pressed
 TEXT_MAIN   = "#1A1208"   # near-black
-TEXT_MUTED  = "#6B5B4E"   # muted brown-grey
-GRID        = "#EDE5DA"   # subtle warm grid
+TEXT_MUTED  = "#4A3728"   # warm dark brown — readable at small sizes
+GRID        = "#D8CEBC"   # slightly darker warm grid — visible in charts
 
 st.markdown(
     f"""
@@ -98,6 +115,7 @@ st.markdown(
     [data-testid="stCaptionContainer"] span,
     .stCaption, small {{
         color: {TEXT_MUTED} !important;
+        font-size: 0.875rem !important;
     }}
 
     [data-testid="stMarkdownContainer"] p,
@@ -123,18 +141,74 @@ st.markdown(
     }}
     [data-testid="stSidebar"] h1,
     [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3 {{ color: #A8D5AA !important; }}
-    [data-testid="stSidebar"] hr {{ border-color: #2E5C3A !important; }}
+    [data-testid="stSidebar"] h3 {{ color: #A8D5AA !important; font-size: 1rem !important; }}
+    [data-testid="stSidebar"] hr {{ border-color: #4A7A5A !important; border-width: 1px !important; opacity: 1 !important; }}
     [data-testid="stSidebar"] a {{ color: #A8D5AA !important; }}
-    [data-testid="stSidebar"] .stButton > button {{
-        background: {ACCENT} !important;
-        color: #fff !important;
-        border: none !important;
-        border-radius: 8px !important;
-        font-weight: 600 !important;
+    [data-testid="stSidebar"] strong {{ color: #E8F5E9 !important; }}
+
+    /* Captions inside sidebar — global rule sets dark brown, override to light */
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] span {{
+        color: #B8D0BB !important;
+        font-size: 0.82rem !important;
     }}
-    [data-testid="stSidebar"] .stButton > button:hover {{
-        background: {ACCENT_DARK} !important;
+
+    /* Widget labels inside sidebar — global rule sets near-black, override to light */
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"],
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] span,
+    [data-testid="stSidebar"] label {{ color: #D4EDD8 !important; }}
+
+    /* Inline code in sidebar (e.g. `.env.example`) — override dark browser default */
+    [data-testid="stSidebar"] code {{
+        color: #D4EDD8 !important;
+        background: rgba(255,255,255,0.15) !important;
+        border-radius: 3px !important;
+        padding: 1px 5px !important;
+    }}
+
+    /* Expander inside sidebar — use <details> selector + test-id fallback.
+       The `*` child beats per-element global rules on specificity (0,2,0 > 0,1,1). */
+    [data-testid="stSidebar"] details,
+    [data-testid="stSidebar"] [data-testid="stExpander"] {{
+        background: #243F2F !important;
+        border: 1px solid #4A7A5A !important;
+        border-radius: 8px !important;
+    }}
+    [data-testid="stSidebar"] details *,
+    [data-testid="stSidebar"] [data-testid="stExpander"] * {{
+        color: #D4EDD8 !important;
+    }}
+    [data-testid="stSidebar"] [data-testid="stExpanderDetails"],
+    [data-testid="stSidebar"] .streamlit-expanderContent {{
+        background: #243F2F !important;
+    }}
+    [data-testid="stSidebar"] details a,
+    [data-testid="stSidebar"] [data-testid="stExpander"] a {{ color: #A8D5AA !important; }}
+    [data-testid="stSidebar"] details code,
+    [data-testid="stSidebar"] [data-testid="stExpander"] code {{
+        background: rgba(255,255,255,0.12) !important;
+    }}
+
+    /* Sidebar action button (.stButton scopes to st.button() only, not expander toggles).
+       Target the span directly to beat the broad [stSidebar] span rule (specificity 0,1,2 > 0,1,1). */
+    [data-testid="stSidebar"] .stButton button {{
+        background: #E8F5E9 !important;
+        border: 2px solid #2E5C3A !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        padding: 0.5rem 1rem !important;
+        width: 100% !important;
+    }}
+    [data-testid="stSidebar"] .stButton button:hover {{
+        background: #ffffff !important;
+        border-color: #1A3B2A !important;
+    }}
+    [data-testid="stSidebar"] .stButton button span,
+    [data-testid="stSidebar"] .stButton button p,
+    [data-testid="stSidebar"] .stButton button * {{
+        color: #1A3B2A !important;
     }}
 
     /* ═══════════════════════════════════════════════════════════
@@ -341,8 +415,8 @@ st.markdown(
         box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
     }}
     [data-testid="stMetricValue"] {{ color: {TEXT_MAIN} !important; font-weight: 700 !important; }}
-    [data-testid="stMetricLabel"] {{ color: {TEXT_MUTED} !important; font-size: 0.85rem !important; }}
-    [data-testid="stMetricDelta"] {{ font-size: 0.82rem !important; }}
+    [data-testid="stMetricLabel"] {{ color: {TEXT_MAIN} !important; font-size: 0.88rem !important; font-weight: 500 !important; }}
+    [data-testid="stMetricDelta"] {{ font-size: 0.85rem !important; color: {TEXT_MUTED} !important; }}
 
     /* ═══════════════════════════════════════════════════════════
        TABS
@@ -354,16 +428,18 @@ st.markdown(
         gap: 2px !important;
     }}
     .stTabs [data-baseweb="tab"] {{
-        color: {TEXT_MUTED} !important;
+        color: {TEXT_MAIN} !important;
         font-weight: 500 !important;
         border-radius: 8px !important;
         padding: 6px 18px !important;
         background: transparent !important;
+        opacity: 0.6;
     }}
     .stTabs [aria-selected="true"] {{
         background: {BG_CARD} !important;
         color: {TEXT_MAIN} !important;
         font-weight: 600 !important;
+        opacity: 1 !important;
         box-shadow: 0 1px 4px rgba(0,0,0,0.10) !important;
     }}
 
@@ -375,11 +451,13 @@ st.markdown(
     [data-testid="stDataFrame"] td {{
         color: {TEXT_MAIN} !important;
         background: {BG_CARD} !important;
+        font-size: 0.92rem !important;
     }}
     [data-testid="stDataFrame"] thead th {{
         background: {GRID} !important;
         color: {TEXT_MAIN} !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
+        font-size: 0.92rem !important;
     }}
 
     /* ═══════════════════════════════════════════════════════════
@@ -417,16 +495,17 @@ st.markdown(
         box-shadow: 0 2px 12px rgba(0,0,0,0.07);
         border-left: 5px solid {ACCENT};
     }}
-    .apple-card h3 {{ margin: 0 0 4px 0; color: {TEXT_MAIN} !important; }}
-    .apple-card small {{ color: {TEXT_MUTED} !important; }}
+    .apple-card h3 {{ margin: 0 0 4px 0; color: {TEXT_MAIN} !important; font-size: 1.05rem !important; }}
+    .apple-card small {{ color: {TEXT_MUTED} !important; font-size: 0.85rem !important; }}
 
     .tag {{
         background: #FFF0EE;
-        border: 1px solid #E8A09A;
+        border: 1px solid #D4786E;
         color: #6B1208 !important;
         border-radius: 20px;
         padding: 4px 12px;
-        font-size: 0.79em;
+        font-size: 0.84em;
+        font-weight: 500;
         margin: 3px 2px;
         display: inline-block;
     }}
@@ -463,22 +542,25 @@ STOP_WORDS = {
 PLOT_LAYOUT = dict(
     plot_bgcolor=BG_PLOT,
     paper_bgcolor=BG_PAPER,
-    font=dict(color=TEXT_MAIN, family="Segoe UI, Arial, sans-serif"),
+    font=dict(color=TEXT_MAIN, family="Segoe UI, Arial, sans-serif", size=13),
     title_font=dict(color=TEXT_MAIN, size=17, family="Segoe UI, Arial, sans-serif"),
+    legend=dict(font=dict(color=TEXT_MAIN, size=12)),
     title_x=0.0,
     margin=dict(l=0, r=0, t=40, b=0),
 )
 
 
 def apply_axes(fig, x_grid=True, y_grid=True):
+    _tick = dict(color=TEXT_MAIN, size=12)
+    _label = dict(color=TEXT_MAIN, size=13)
     if x_grid:
-        fig.update_xaxes(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(color=TEXT_MAIN))
+        fig.update_xaxes(gridcolor=GRID, zerolinecolor=GRID, tickfont=_tick, title_font=_label)
     else:
-        fig.update_xaxes(showgrid=False, zerolinecolor=GRID, tickfont=dict(color=TEXT_MAIN))
+        fig.update_xaxes(showgrid=False, zerolinecolor=GRID, tickfont=_tick, title_font=_label)
     if y_grid:
-        fig.update_yaxes(gridcolor=GRID, zerolinecolor=GRID, tickfont=dict(color=TEXT_MAIN))
+        fig.update_yaxes(gridcolor=GRID, zerolinecolor=GRID, tickfont=_tick, title_font=_label)
     else:
-        fig.update_yaxes(showgrid=False, zerolinecolor=GRID, tickfont=dict(color=TEXT_MAIN))
+        fig.update_yaxes(showgrid=False, zerolinecolor=GRID, tickfont=_tick, title_font=_label)
     return fig
 
 
@@ -524,15 +606,15 @@ def _make_radar(series: dict[str, dict[str, float]], title: str = "") -> go.Figu
         ))
     fig.update_layout(
         polar=dict(
-            radialaxis=dict(visible=True, range=[0, 10], tickfont=dict(color=TEXT_MUTED, size=9), gridcolor=GRID),
-            angularaxis=dict(tickfont=dict(color=TEXT_MAIN, size=12)),
+            radialaxis=dict(visible=True, range=[0, 10], tickfont=dict(color=TEXT_MAIN, size=11), gridcolor=GRID),
+            angularaxis=dict(tickfont=dict(color=TEXT_MAIN, size=13)),
             bgcolor=BG_PLOT,
         ),
         title=dict(text=title, font=dict(color=TEXT_MAIN, size=17)),
         paper_bgcolor=BG_PAPER,
-        font=dict(color=TEXT_MAIN),
+        font=dict(color=TEXT_MAIN, size=13),
         showlegend=True,
-        legend=dict(font=dict(color=TEXT_MAIN)),
+        legend=dict(font=dict(color=TEXT_MAIN, size=12)),
         margin=dict(l=20, r=20, t=50, b=20),
     )
     return fig
@@ -566,7 +648,13 @@ def render_rec_card(rec: dict, card_idx: int, df: pd.DataFrame, is_pinned: bool 
     model_conf = rec.get("confidence", "")
     local_conf = _local_confidence(rec, df)
 
+    ar_real = rec.get("ar_score")
+    ar_est  = rec.get("ar_score_estimate", "")
     conf_parts: list[str] = []
+    if ar_real:
+        conf_parts.append(f"AR {ar_real}/100")
+    elif ar_est:
+        conf_parts.append(f"AR ~{ar_est}/100")
     if model_conf:
         conf_parts.append(f"Model: {model_conf}/10")
     if local_conf is not None:
@@ -686,10 +774,16 @@ if not _scored.empty:
     st.divider()
 
 if "recommendations" not in st.session_state:
-    st.session_state["recommendations"] = _load_rec_cache()
+    _init_recs, _init_rec_at, _init_rec_count = _load_rec_cache()
+    st.session_state["recommendations"] = _init_recs
+    st.session_state["rec_generated_at"] = _init_rec_at
+    st.session_state["rec_entry_count"] = _init_rec_count
 
 if "smart_recs" not in st.session_state:
-    st.session_state["smart_recs"] = _load_smart_cache()
+    _init_smart, _init_smart_at, _init_smart_count = _load_smart_cache()
+    st.session_state["smart_recs"] = _init_smart
+    st.session_state["smart_generated_at"] = _init_smart_at
+    st.session_state["smart_entry_count"] = _init_smart_count
 
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
@@ -791,6 +885,60 @@ with tab_dash:
             fig_time.update_layout(coloraxis_showscale=True, **PLOT_LAYOUT)
             apply_axes(fig_time)
             st.plotly_chart(fig_time, use_container_width=True)
+
+    if "AR Score" in df.columns:
+        _ar_df = df.copy()
+        _ar_df["_ar"] = pd.to_numeric(_ar_df["AR Score"], errors="coerce")
+        _ar_df = _ar_df.dropna(subset=["Score", "_ar"])
+        if not _ar_df.empty:
+            st.divider()
+            st.subheader("You vs. AppleRankings.com")
+            st.caption(
+                "Each dot is a variety you've enriched with AR data. "
+                "Top-right = you both love it · Top-left = your hidden gem · "
+                "Bottom-right = overhyped by AR · dashed lines at your score 7 and AR 70."
+            )
+
+            def _quad(row):
+                if row["Score"] >= 7 and row["_ar"] >= 70:
+                    return "Both love it"
+                if row["Score"] >= 7:
+                    return "Your hidden gem"
+                if row["_ar"] >= 70:
+                    return "Overhyped"
+                return "Both pass"
+
+            _ar_df["Quadrant"] = _ar_df.apply(_quad, axis=1)
+            _qcolor = {
+                "Both love it":    "#2E8B40",
+                "Your hidden gem": "#4A7FD9",
+                "Overhyped":       ACCENT,
+                "Both pass":       TEXT_MUTED,
+            }
+            _hov_ar = {k: True for k in ["Tasting Notes", "From Where"] if k in _ar_df.columns}
+            fig_ar = px.scatter(
+                _ar_df,
+                x="_ar",
+                y="Score",
+                hover_name="Apple Variety",
+                hover_data=_hov_ar,
+                color="Quadrant",
+                color_discrete_map=_qcolor,
+                labels={"_ar": "AppleRankings Score (1–100)", "Score": "Your Score (1–10)"},
+                title="Agreement with AppleRankings.com",
+            )
+            fig_ar.add_hline(y=7,  line_dash="dot", line_color=GRID, line_width=1.5)
+            fig_ar.add_vline(x=70, line_dash="dot", line_color=GRID, line_width=1.5)
+            fig_ar.update_layout(**PLOT_LAYOUT)
+            apply_axes(fig_ar)
+            st.plotly_chart(fig_ar, use_container_width=True)
+
+            if len(_ar_df) >= 3:
+                _corr = _ar_df[["Score", "_ar"]].corr().iloc[0, 1]
+                st.caption(
+                    f"Pearson correlation with AR: **{_corr:.2f}** "
+                    f"across {len(_ar_df)} enriched varieties"
+                )
 
     st.divider()
     st.subheader("Your Taste Fingerprint")
@@ -998,6 +1146,19 @@ with tab_add:
         country    = tags.get("country") or "?"
         st.caption(f"Auto-detected: **{apple_type}** · **{origin}** · **{country}**")
 
+    if auto_name.strip():
+        _existing = df[df["Apple Variety"].str.strip().str.lower() == auto_name.strip().lower()]
+        if not _existing.empty:
+            _ex = _existing.iloc[0]
+            _score_str  = f"{_ex['Score']:.1f}/10" if pd.notna(_ex.get("Score")) else "?"
+            _date_str   = _ex["Date"].strftime("%b %Y") if pd.notna(_ex.get("Date")) else "?"
+            _source_str = f" from {_ex.get('From Where', '')}" if _ex.get("From Where") else ""
+            st.warning(
+                f"⚠️ You've already logged **{_ex['Apple Variety']}** — "
+                f"scored {_score_str} in {_date_str}{_source_str}. "
+                "Submit anyway to add a second entry."
+            )
+
     st.divider()
 
     with st.form("add_apple_form", clear_on_submit=True):
@@ -1092,30 +1253,48 @@ with tab_recs:
     with col_clear:
         if st.button("🗑 Clear Cache", help="Remove locally cached recommendations"):
             st.session_state["recommendations"] = []
-            _save_rec_cache([])
+            st.session_state["rec_entry_count"] = None
+            _save_rec_cache([], 0)
             st.rerun()
 
     if gen_clicked:
         if not os.environ.get("OPENROUTER_API_KEY"):
             st.error("OPENROUTER_API_KEY is not set. Add it to your .env file.")
         else:
-            from recommendations import get_recommendations, add_images
+            from recommendations import get_recommendations, add_images, add_ar_scores, RecommendationError
+            try:
+                with st.spinner("Analysing your apple preferences…"):
+                    recs = get_recommendations(
+                        df,
+                        num_recs=num_recs,
+                        already_pinned=sorted(pinned_names),
+                    )
 
-            with st.spinner("Analysing your apple preferences…"):
-                recs = get_recommendations(
-                    df,
-                    num_recs=num_recs,
-                    already_pinned=sorted(pinned_names),
+                with st.spinner("Fetching AR scores from applerankings.com…"):
+                    recs = add_ar_scores(recs)
+
+                if os.environ.get("TAVILY_API_KEY"):
+                    with st.spinner("Fetching variety images…"):
+                        recs = add_images(recs)
+
+                st.session_state["recommendations"] = recs
+                st.session_state["rec_entry_count"] = len(df)
+                _save_rec_cache(recs, len(df))
+            except RecommendationError as exc:
+                st.error(
+                    "The recommendation engine returned an unexpected response — please try again.\n\n"
+                    f"Detail: {exc}"
                 )
 
-            if os.environ.get("TAVILY_API_KEY"):
-                with st.spinner("Fetching variety images…"):
-                    recs = add_images(recs)
-
-            st.session_state["recommendations"] = recs
-            _save_rec_cache(recs)
-
     recs: list[dict] = st.session_state.get("recommendations", [])
+
+    _rec_entry_count = st.session_state.get("rec_entry_count")
+    if recs and _rec_entry_count is not None and _rec_entry_count != len(df):
+        st.info(
+            f"Your collection has changed since these recommendations were generated "
+            f"({_rec_entry_count} → {len(df)} varieties). "
+            "Regenerate for up-to-date results."
+        )
 
     if recs:
         n_pinned = sum(1 for r in recs if r.get("name", "") in pinned_names)
@@ -1150,7 +1329,8 @@ with tab_recs:
     with col_smart_clear:
         if st.button("🗑 Clear", key="smart_recs_clear", help="Remove cached Smart Match results"):
             st.session_state["smart_recs"] = []
-            _save_smart_cache([])
+            st.session_state["smart_entry_count"] = None
+            _save_smart_cache([], 0)
             st.rerun()
 
     if smart_clicked:
@@ -1168,20 +1348,41 @@ with tab_recs:
                     "then come back here for the best Smart Match results. "
                     "Generating recommendations from your personal scores only for now…"
                 )
-            from recommendations import get_ar_smart_recommendations, add_images as _add_images_smart
-            with st.spinner("Analysing your AR + taste profile…"):
-                smart_recs_new = get_ar_smart_recommendations(
-                    df,
-                    num_recs=num_recs,
-                    already_pinned=sorted(pinned_names),
+            from recommendations import get_ar_smart_recommendations, add_images as _add_images_smart, add_ar_scores as _add_ar_smart, RecommendationError as _SmartRecError
+            try:
+                with st.spinner("Analysing your AR + taste profile…"):
+                    smart_recs_new = get_ar_smart_recommendations(
+                        df,
+                        num_recs=num_recs,
+                        already_pinned=sorted(pinned_names),
+                    )
+
+                with st.spinner("Fetching AR scores from applerankings.com…"):
+                    smart_recs_new = _add_ar_smart(smart_recs_new)
+
+                if os.environ.get("TAVILY_API_KEY"):
+                    with st.spinner("Fetching variety images…"):
+                        smart_recs_new = _add_images_smart(smart_recs_new)
+
+                st.session_state["smart_recs"] = smart_recs_new
+                st.session_state["smart_entry_count"] = len(df)
+                _save_smart_cache(smart_recs_new, len(df))
+            except _SmartRecError as exc:
+                st.error(
+                    "Smart Match returned an unexpected response — please try again.\n\n"
+                    f"Detail: {exc}"
                 )
-            if os.environ.get("TAVILY_API_KEY"):
-                with st.spinner("Fetching variety images…"):
-                    smart_recs_new = _add_images_smart(smart_recs_new)
-            st.session_state["smart_recs"] = smart_recs_new
-            _save_smart_cache(smart_recs_new)
 
     smart_recs: list[dict] = st.session_state.get("smart_recs", [])
+
+    _smart_entry_count = st.session_state.get("smart_entry_count")
+    if smart_recs and _smart_entry_count is not None and _smart_entry_count != len(df):
+        st.info(
+            f"Your collection has changed since Smart Match was generated "
+            f"({_smart_entry_count} → {len(df)} varieties). "
+            "Re-run Smart Match for up-to-date results."
+        )
+
     if smart_recs:
         n_smart_pinned = sum(1 for r in smart_recs if r.get("name", "") in pinned_names)
         st.markdown(f"### {len(smart_recs)} Smart Matches  &nbsp;·&nbsp; {n_smart_pinned} saved")
@@ -1223,19 +1424,29 @@ with tab_recs:
         if not os.environ.get("OPENROUTER_API_KEY"):
             st.error("OPENROUTER_API_KEY is not set.")
         else:
-            from recommendations import get_similar_recommendations, add_images as _add_images
-            with st.spinner(f"Finding apples similar to {similar_to}…"):
-                sim_recs = get_similar_recommendations(
-                    similar_to,
-                    df,
-                    num_recs=3,
-                    already_pinned=sorted(pinned_names),
+            from recommendations import get_similar_recommendations, add_images as _add_images, add_ar_scores as _add_ar_sim, RecommendationError as _SimRecError
+            try:
+                with st.spinner(f"Finding apples similar to {similar_to}…"):
+                    sim_recs = get_similar_recommendations(
+                        similar_to,
+                        df,
+                        num_recs=3,
+                        already_pinned=sorted(pinned_names),
+                    )
+
+                with st.spinner("Fetching AR scores from applerankings.com…"):
+                    sim_recs = _add_ar_sim(sim_recs)
+
+                if os.environ.get("TAVILY_API_KEY"):
+                    with st.spinner("Fetching images…"):
+                        sim_recs = _add_images(sim_recs)
+                st.session_state["similar_recs"] = sim_recs
+                st.session_state["similar_to"] = similar_to
+            except _SimRecError as exc:
+                st.error(
+                    "Find Similar returned an unexpected response — please try again.\n\n"
+                    f"Detail: {exc}"
                 )
-            if os.environ.get("TAVILY_API_KEY"):
-                with st.spinner("Fetching images…"):
-                    sim_recs = _add_images(sim_recs)
-            st.session_state["similar_recs"] = sim_recs
-            st.session_state["similar_to"] = similar_to
 
     sim_recs: list[dict] = st.session_state.get("similar_recs", [])
     if sim_recs:
@@ -1338,7 +1549,7 @@ with tab_planner:
     from planner import (
         KNOWN_STORES, UNION_SQUARE_VENDORS,
         MONTH_NAMES as _MONTH_NAMES, STORE_TYPE_LABELS,
-        classify_store, available_at, plan_visit,
+        available_at, plan_visit,
     )
 
     st.subheader("🛒 Store Visit Planner")
@@ -1560,6 +1771,33 @@ with st.sidebar:
     ]:
         icon = "✅" if os.environ.get(env_key) else "❌"
         st.markdown(f"{icon} {label}")
+
+    try:
+        from planner import available_at
+        _now_month = pd.Timestamp.now().month
+        _wl_names = {
+            item.get("Name", "").strip().lower()
+            for item in load_wishlist_data()
+            if item.get("Name", "").strip()
+        }
+        if _wl_names:
+            _avail_now: set[str] = set()
+            for _stype in ("orchard", "farmers_market", "premium", "supermarket"):
+                _avail_now |= set(available_at(_stype, _now_month).keys())
+            _hits = sorted(n for n in _wl_names if n in _avail_now)
+            if _hits:
+                st.divider()
+                _hit_count = len(_hits)
+                st.markdown(
+                    f"🍎 **{_hit_count} wishlist "
+                    f"{'variety' if _hit_count == 1 else 'varieties'} in season now**"
+                )
+                for _h in _hits[:5]:
+                    st.markdown(f"· {_h.title()}")
+                if _hit_count > 5:
+                    st.caption(f"+ {_hit_count - 5} more — see Store Planner")
+    except Exception:
+        pass
 
     st.divider()
     st.markdown("**First run?** Copy `.env.example` → `.env` and fill in your keys.")

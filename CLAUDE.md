@@ -20,11 +20,13 @@ BG_CARD    = "#FFFFFF"
 BG_SIDEBAR = "#1A3B2A"   # deep forest green
 ACCENT     = "#C0392B"   # red apple
 TEXT_MAIN  = "#1A1208"
-TEXT_MUTED = "#6B5B4E"
-GRID       = "#EDE5DA"
+TEXT_MUTED = "#4A3728"   # warm dark brown — readable at small sizes
+GRID       = "#D8CEBC"   # slightly darker warm grid — visible in charts
 ```
 
 Do not introduce new colour values. All charts use `PLOT_LAYOUT` and `apply_axes()`.
+
+`PLOT_LAYOUT` includes `font=dict(size=13)` as a base; `apply_axes()` sets explicit `tickfont` size 12 and `title_font` size 13 on both axes. Always call `apply_axes(fig)` after `fig.update_layout(**PLOT_LAYOUT)`.
 
 ## Sheet schema
 
@@ -40,11 +42,24 @@ Auto-tag columns: `Type`, `Origin`, `Country`.
 ## Key patterns
 
 **Session state keys used across tabs:**
-- `recommendations` — main AI rec list (also persisted to `recommendations_cache.json`)
+- `recommendations` — main AI rec list (persisted to `recommendations_cache.json`)
+- `rec_generated_at` — ISO timestamp when main recs were generated
+- `rec_entry_count` — `len(df)` at generation time; used for stale-cache detection
 - `smart_recs` — AR-smart rec list (persisted to `smart_recommendations_cache.json`)
+- `smart_generated_at` / `smart_entry_count` — same metadata for smart recs
 - `similar_recs` / `similar_to` — "Find Me Something Like" results
 - `pinned_names` — set of variety names saved to wishlist
 - `add_auto_name`, `add_tags`, `_prefill_source`, `prefill_from_rec` — Add Entry prefill flow
+
+**Cache file format** (`recommendations_cache.json`, `smart_recommendations_cache.json`):
+```json
+{
+  "generated_at": "2026-05-05T22:00:00+00:00",
+  "entry_count": 42,
+  "recs": [ ... ]
+}
+```
+Old flat-list format is handled by `_load_rec_cache()` for backward compatibility.
 
 **Enrichment flow** (`enrichment.py`):
 1. Tavily searches apple-specific sites (orangepippin.com, pomiferous.com) for tasting notes
@@ -53,16 +68,37 @@ Auto-tag columns: `Type`, `Origin`, `Country`.
 4. `_fetch_applerankings()` scrapes applerankings.com for a numeric score + review snippet
 
 **Recommendation flow** (`recommendations.py`):
+- `RecommendationError` — custom exception raised when `json.loads()` fails on the LLM response; caught in `app.py` and shown as `st.error` with a retry prompt
 - `_STORE_TIERS` — the store priority list injected into every prompt; locations are specific to South Orange NJ and Flatiron Manhattan (★ = within 5 miles)
 - `_REC_SCHEMA` — JSON schema all three rec functions share
 - Three prompt builders: `_build_prompt` (standard), `_build_ar_smart_prompt` (AR + user correlation), `_build_similar_prompt` (similar variety)
-- All return the same JSON array format; `add_images()` enriches with Tavily image URLs after the LLM call
+- All return the same JSON array format; `add_ar_scores()` fetches real AR scores, then `add_images()` enriches with Tavily image URLs
+
+**Stale cache banner** (`app.py`, Recommendations tab):
+- After each generation, `rec_entry_count` is saved to the cache JSON and session state
+- On tab render, if `rec_entry_count != len(df)`, an `st.info` banner prompts regeneration
+- Same logic applied independently to smart recs via `smart_entry_count`
+
+**Duplicate entry warning** (`app.py`, Add Entry tab):
+- Triggered when `auto_name` is non-empty; checks `df["Apple Variety"]` case-insensitively
+- Displayed via `st.warning` before the form, showing the existing score, date, and source
+- User can still submit to log a second entry (useful for seasonal re-tastings)
+
+**Dashboard — You vs. AR scatter** (`app.py`, tab_dash):
+- Only rendered when `"AR Score"` column exists and has at least one numeric value
+- Quadrant labels: "Both love it" (your ≥7, AR ≥70), "Your hidden gem", "Overhyped", "Both pass"
+- Dashed crosshairs at score 7 / AR 70; Pearson correlation caption shown for ≥3 enriched varieties
 
 **Planner** (`planner.py`):
 - `APPLE_SEASONS` — ~70 varieties with `orchard` months, `market` months, `stores` tier (`all`/`premium`/`specialty`/`orchard-only`), and a short note
 - `classify_store(name)` maps a store name to `orchard`, `farmers_market`, `premium`, `supermarket`, or `unknown`
 - `plan_visit()` returns `{wishlist_hits, restock, scout}` — pure Python, no API calls
 - `UNION_SQUARE_VENDORS` — four named orchard vendors displayed as a callout in the UI (Locust Grove, Fishkill Farms, Samascott, Wilklow)
+
+**Sidebar in-season alert** (`app.py`, sidebar block):
+- Calls `available_at(store_type, month)` for all four store types and unions the results
+- Matches against `load_wishlist_data()` names (lowercased); shows count + up to 5 variety names
+- Wrapped in `try/except` — never crashes the sidebar if planner data is missing
 
 ## Location context
 

@@ -10,6 +10,7 @@ A personal Streamlit dashboard for logging, analyzing, and discovering apple var
 - Score distribution histogram
 - Average score by store / source
 - Score over time with LOWESS trend line
+- **You vs. AppleRankings.com** scatter plot — quadrant view (Both love it · Your hidden gem · Overhyped · Both pass) with Pearson correlation stat; appears once AR Score data is enriched
 - Taste Fingerprint radar chart (Sweet · Tart · Crisp · Juicy · Floral · Earthy · Spiced · Bitter), weighted by your scores
 - Top flavor keywords bar chart
 - World origin map shaded by average score
@@ -21,6 +22,7 @@ A personal Streamlit dashboard for logging, analyzing, and discovering apple var
 
 ### ➕ Add Entry
 - Log a new variety with name, date, score, tasting notes, and source
+- **Duplicate entry warning** — if the variety name already exists in your collection, a warning shows the previous score, date, and source before you submit
 - **Auto-fill** — one click looks up the variety's type (eating/cooking/cider), origin region, and country via LLM
 - Pre-fill from wishlist when marking a variety as tried
 
@@ -34,6 +36,10 @@ Three recommendation modes, all powered by OpenRouter:
 | **Find Me Something Like…** | Pick any variety from your collection; get 3 closely matched alternatives |
 
 All recommendations include flavor profile, tasting note tags, price estimate, and where to find the variety near you.
+
+**UX guardrails:**
+- **Stale cache banner** — if your collection has grown since recommendations were last generated, a banner prompts you to regenerate
+- **JSON error recovery** — if the LLM returns malformed JSON, a friendly error message appears with a prompt to retry (no raw traceback)
 
 ### 📋 Wishlist
 - Save recommendations to a persistent wishlist (Google Sheets tab)
@@ -53,6 +59,11 @@ Includes a **Coming up** expander (new arrivals in the next 2 months) and a copy
 - Within 5 miles of Flatiron, Manhattan (Union Square Greenmarket ★★, Whole Foods Union Square, Trader Joe's 14th St, Fairway)
 - NJ day-trip orchards (Demarest Farms, Alstede Farms, Terhune Orchards, Battleview Orchards, Melick's Town Farm)
 - Union Square Greenmarket vendors (Locust Grove, Fishkill Farms, Samascott Orchards, Wilklow Orchards)
+
+### ⚙️ Sidebar
+- Refresh Sheet Data button
+- API status indicators (Google Sheets, OpenRouter, Tavily)
+- **In-season wishlist alert** — automatically shows how many of your wishlisted varieties are available right now (across all store types), with variety names listed
 
 ---
 
@@ -173,5 +184,6 @@ Each axis is scored by keyword matching against tasting notes; the radar is weig
 
 - Sheet data: cached 5 minutes (`st.cache_data(ttl=300)`)
 - Wishlist: cached 60 seconds
-- AI recommendations: persisted to `recommendations_cache.json` (survives page reloads)
-- Smart Match recommendations: persisted to `smart_recommendations_cache.json`
+- AI recommendations: persisted to `recommendations_cache.json` (survives page reloads). Format: `{"generated_at": "<ISO timestamp>", "entry_count": N, "recs": [...]}`
+- Smart Match recommendations: persisted to `smart_recommendations_cache.json` (same format)
+- A stale-cache banner appears in the Recommendations tab when `entry_count` in the cache differs from the current collection size

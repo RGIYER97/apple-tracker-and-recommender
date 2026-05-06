@@ -7,6 +7,10 @@ from openai import OpenAI
 from tavily import TavilyClient
 
 
+class RecommendationError(Exception):
+    pass
+
+
 def _tag_profile(df: pd.DataFrame) -> str:
     parts = []
     for col, label in [("Type", "Variety types tried"), ("Origin", "Origins tried"), ("Country", "Countries")]:
@@ -66,6 +70,7 @@ Return ONLY a valid JSON array — no markdown fences, no prose. Each element:
   "tasting_notes": ["note1", "note2", "note3", "note4"],
   "price_range": "~$X/lb or ~$X/bag",
   "confidence": 9.2,
+  "ar_score_estimate": 82,
   "stores": [
     {
       "name": "Store or orchard name",
@@ -94,6 +99,14 @@ def _format_top_apples(top: pd.DataFrame) -> str:
     return "\n".join(lines) if lines else "None"
 
 
+def _tried_names_section(df: pd.DataFrame) -> str:
+    names = sorted(df["Apple Variety"].dropna().str.strip().unique().tolist())
+    if not names:
+        return ""
+    bullets = "\n".join(f"- {n}" for n in names)
+    return f"\nDO NOT RECOMMEND any of these — I have already tried them:\n{bullets}\n"
+
+
 def _build_prompt(df: pd.DataFrame, num_recs: int, already_pinned: list[str] | None = None) -> str:
     top = df[df["Score"] >= 8].sort_values("Score", ascending=False)
     disliked = df[df["Score"] < 6]
@@ -104,6 +117,8 @@ def _build_prompt(df: pd.DataFrame, num_recs: int, already_pinned: list[str] | N
         if not disliked.empty
         else "None"
     )
+
+    tried_section = _tried_names_section(df)
 
     pinned_section = ""
     if already_pinned:
@@ -124,7 +139,7 @@ LESS ENJOYED (below 6/10):
 {disliked_str}
 
 OVERALL AVERAGE SCORE: {df["Score"].mean():.1f}/10
-{tag_section}{pinned_section}
+{tag_section}{tried_section}{pinned_section}
 IMPORTANT — when "My notes" and "Prof. notes" describe different characteristics for the same variety, \
 trust "My notes". They reflect what I actually tasted; professional descriptions are a reference only.
 
@@ -162,6 +177,8 @@ def _build_similar_prompt(
     else:
         apple_desc = f'"{apple_name}"'
 
+    tried_section = _tried_names_section(df)
+
     pinned_section = ""
     if already_pinned:
         bullet_list = "\n".join(f"- {name}" for name in already_pinned)
@@ -176,13 +193,37 @@ Do NOT recommend any of these (already in my wishlist):
     )
 
     return f"""I'm an apple enthusiast. I love {apple_desc} and want to find similar varieties I haven't tried.
-{pinned_section}
+{tried_section}{pinned_section}
 Please recommend {num_recs} apple varieties that are similar to "{apple_name}" and that I would enjoy.
 
 For each variety list specific stores or orchards using this priority:
 {_STORE_TIERS}
 
 {schema}"""
+
+
+def _filter_recs(
+    recs: list[dict],
+    df: pd.DataFrame,
+    already_pinned: list[str],
+) -> list[dict]:
+    """
+    Post-processing guard: remove duplicates within the set and any variety
+    already in the user's collection or wishlist, regardless of what the LLM returned.
+    """
+    tried_lower = {str(v).strip().lower() for v in df["Apple Variety"].dropna()}
+    pinned_lower = {n.strip().lower() for n in already_pinned}
+    exclude = tried_lower | pinned_lower
+
+    seen: set[str] = set()
+    out: list[dict] = []
+    for rec in recs:
+        key = (rec.get("name") or "").strip().lower()
+        if not key or key in seen or key in exclude:
+            continue
+        seen.add(key)
+        out.append(rec)
+    return out
 
 
 def get_recommendations(
@@ -194,7 +235,8 @@ def get_recommendations(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url="https://openrouter.ai/api/v1",
     )
-    prompt = _build_prompt(df, num_recs, already_pinned=already_pinned or [])
+    pinned = already_pinned or []
+    prompt = _build_prompt(df, num_recs, already_pinned=pinned)
     model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4.1-mini")
 
     response = client.chat.completions.create(
@@ -212,7 +254,13 @@ def get_recommendations(
     text = (response.choices[0].message.content or "").strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RecommendationError(
+            f"Model returned invalid JSON: {exc}\n\nResponse (first 300 chars):\n{text[:300]}"
+        ) from exc
+    return _filter_recs(parsed, df, pinned)
 
 
 def get_similar_recommendations(
@@ -225,7 +273,8 @@ def get_similar_recommendations(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url="https://openrouter.ai/api/v1",
     )
-    prompt = _build_similar_prompt(apple_name, df, num_recs, already_pinned=already_pinned or [])
+    pinned = already_pinned or []
+    prompt = _build_similar_prompt(apple_name, df, num_recs, already_pinned=pinned)
     model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4.1-mini")
 
     response = client.chat.completions.create(
@@ -243,7 +292,13 @@ def get_similar_recommendations(
     text = (response.choices[0].message.content or "").strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RecommendationError(
+            f"Model returned invalid JSON: {exc}\n\nResponse (first 300 chars):\n{text[:300]}"
+        ) from exc
+    return _filter_recs(parsed, df, pinned)
 
 
 def _fetch_image_url(tavily: TavilyClient, name: str) -> str:
@@ -395,6 +450,8 @@ def _build_ar_smart_prompt(
     ar_only_str = "\n".join(_fmt(t) for t in ar_high_only) or "None"
     untried_str = ", ".join(untried_ar[:60]) if untried_ar else "(none listed)"
 
+    tried_section = _tried_names_section(df)
+
     pinned_section = ""
     if already_pinned:
         pinned_section = (
@@ -414,7 +471,7 @@ APPLES I LOVE BUT WITHOUT HIGH AR SCORES — personal taste diverging from AR co
 
 AR-LOVED APPLES I RATED LOWER — styles AR endorses that I don't seem to enjoy:
 {ar_only_str}
-{pinned_section}
+{tried_section}{pinned_section}
 UNTRIED VARIETIES FROM THE APPLERANKINGS.COM CATALOG:
 {untried_str}
 
@@ -438,7 +495,8 @@ def get_ar_smart_recommendations(
         api_key=os.environ["OPENROUTER_API_KEY"],
         base_url="https://openrouter.ai/api/v1",
     )
-    prompt = _build_ar_smart_prompt(df, num_recs, already_pinned=already_pinned or [])
+    pinned = already_pinned or []
+    prompt = _build_ar_smart_prompt(df, num_recs, already_pinned=pinned)
     model = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4.1-mini")
 
     response = client.chat.completions.create(
@@ -456,7 +514,13 @@ def get_ar_smart_recommendations(
     text = (response.choices[0].message.content or "").strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    return json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RecommendationError(
+            f"Model returned invalid JSON: {exc}\n\nResponse (first 300 chars):\n{text[:300]}"
+        ) from exc
+    return _filter_recs(parsed, df, pinned)
 
 
 def _local_confidence(rec: dict, df: pd.DataFrame) -> float | None:
@@ -494,3 +558,22 @@ def _local_confidence(rec: dict, df: pd.DataFrame) -> float | None:
     if not signals:
         return None
     return round(1.0 + (sum(signals) / len(signals)) * 9.0, 1)
+
+
+def add_ar_scores(recommendations: list[dict]) -> list[dict]:
+    """Fetch real AR scores from applerankings.com, replacing LLM estimates."""
+    from enrichment import _fetch_applerankings
+    for rec in recommendations:
+        name = rec.get("name", "")
+        if not name:
+            continue
+        try:
+            score, notes = _fetch_applerankings(name)
+            if score:
+                rec["ar_score"] = int(score)
+            if notes:
+                rec["ar_notes"] = notes
+        except Exception as exc:
+            print(f"[add_ar_scores] {name}: {exc}")
+        time.sleep(0.3)
+    return recommendations
